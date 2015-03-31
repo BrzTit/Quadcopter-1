@@ -1,0 +1,2 @@
+# Quadcopter
+This repository will contain my current code for my senior project. I will be building a quadcopter from the ground up that will be able to aid in a natural disaster. Relief volunteer may need to see the wreckage of building from a different vantage point, so having a quadcopter capable of taking picture and relaying those back to the volunteers could be critical in getting the survivors the relief they need.

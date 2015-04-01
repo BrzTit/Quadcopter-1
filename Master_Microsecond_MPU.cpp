@@ -75,104 +75,12 @@ Quaternion q;           // [w, x, y, z]         quaternion container
 VectorFloat gravity;    // [x, y, z]            gravity vector
 float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
 
-// Use the following global variables and access functions to help store the overall
-// rotation angle of the sensor
-unsigned long last_read_time;
-float         last_x_angle;       // These are the filtered angles
-float         last_y_angle;
-float         last_z_angle;
-float         last_gyro_x_angle;  // Store the gyro angles to compare drift
-float         last_gyro_y_angle;
-float         last_gyro_z_angle;
-
-void set_last_read_angle_data(unsigned long time, float x, float y, float z, float x_gyro, float y_gyro, float z_gyro) {
-  last_read_time = time;
-  last_x_angle = x;
-  last_y_angle = y;
-  last_z_angle = z;
-  last_gyro_x_angle = x_gyro;
-  last_gyro_y_angle = y_gyro;
-  last_gyro_z_angle = z_gyro;
-}
-
-inline unsigned long get_last_time() {return last_read_time;}
-inline float get_last_x_angle() {return last_x_angle;}
-inline float get_last_y_angle() {return last_y_angle;}
-inline float get_last_z_angle() {return last_z_angle;}
-inline float get_last_gyro_x_angle() {return last_gyro_x_angle;}
-inline float get_last_gyro_y_angle() {return last_gyro_y_angle;}
-inline float get_last_gyro_z_angle() {return last_gyro_z_angle;}
-
-//  Use the following global variables
-//  to calibrate the gyroscope sensor and accelerometer readings
-float    base_x_gyro = 0;
-float    base_y_gyro = 0;
-float    base_z_gyro = 0;
-float    base_x_accel = 0;
-float    base_y_accel = 0;
-float    base_z_accel = 0;
-
-// This global variable tells us how to scale gyroscope data
-float    GYRO_FACTOR;
-
-// This global varible tells how to scale acclerometer data
-float    ACCEL_FACTOR;
-
-// Variables to store the values from the sensor readings
-int16_t ax, ay, az;
-int16_t gx, gy, gz;
-
-const float RADIANS_TO_DEGREES = 57.2958; //180/3.14159
-unsigned long t_now;
-float gyro_x, gyro_y, gyro_z;
-float accel_x, accel_y, accel_z;
-float accel_angle_x, accel_angle_y, accel_angle_z;
-float dt;
-float gyro_angle_x, gyro_angle_y, gyro_angle_z;
-float unfiltered_gyro_angle_x, unfiltered_gyro_angle_y, unfiltered_gyro_angle_z;
-const float alpha = 0.96;
-float angle_x, angle_y, angle_z;
-
-// Buffer for data output
-char dataOut[256];
-
   // ================================================================
   // ===               INTERRUPT DETECTION ROUTINE                ===
   // ================================================================
 volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
 void dmpDataReady() {
     mpuInterrupt = true;
-}
-
-// ================================================================
-// ===                CALIBRATION_ROUTINE                       ===
-// ================================================================
-// Simple calibration - just average first few readings to subtract
-// from the later data
-void calibrate_sensors() {
-  int       num_readings = 10;
-
-  // Discard the first reading (don't know if this is needed or
-  // not, however, it won't hurt.)
-  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-
-  // Read and average the raw values
-  for (int i = 0; i < num_readings; i++) {
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-    base_x_gyro += gx;
-    base_y_gyro += gy;
-    base_z_gyro += gz;
-    base_x_accel += ax;
-    base_y_accel += ay;
-    base_y_accel += az;
-  }
-
-  base_x_gyro /= num_readings;
-  base_y_gyro /= num_readings;
-  base_z_gyro /= num_readings;
-  base_x_accel /= num_readings;
-  base_y_accel /= num_readings;
-  base_z_accel /= num_readings;
 }
 
 // Motors
@@ -186,7 +94,7 @@ float va, vb, vc, vd;                    //velocities
 // PID Algorithm
 #include <PID_v1.h>
 
-#define PITCH_P_VAL 0.1f
+#define PITCH_P_VAL 7.0f
 #define PITCH_I_VAL 0.0f
 #define PITCH_D_VAL 0.0f
 
@@ -194,33 +102,32 @@ float va, vb, vc, vd;                    //velocities
 #define ROLL_I_VAL 0.0f
 #define ROLL_D_VAL 0.0f
 
-#define YAW_P_VAL 0.0f
-#define YAW_I_VAL 0.0f
-#define YAW_D_VAL 0.0f
+// #define YAW_P_VAL 0.0f
+// #define YAW_I_VAL 0.0f
+// #define YAW_D_VAL 0.0f
 
-#define PITCH_MIN -90
-#define PITCH_MAX 90
-#define ROLL_MIN -90
-#define ROLL_MAX 90
-#define YAW_MIN -180
-#define YAW_MAX 180
+#define PITCH_MIN -200
+#define PITCH_MAX 200
+#define ROLL_MIN -100
+#define ROLL_MAX 100
+// #define YAW_MIN -180
+// #define YAW_MAX 180
 
 #define PID_PITCH_INFLUENCE 100
 #define PID_ROLL_INFLUENCE 100
-#define PID_YAW_INFLUENCE 100
+// #define PID_YAW_INFLUENCE 100
 
 float bal_ac = 0, bal_bd = 0, bal_axes = 0;
 
-//PID yawReg(&last_z_angle, &bal_axes, &unCh4In, YAW_P_VAL, YAW_I_VAL, YAW_D_VAL, DIRECT);
-PID pitchReg(&last_y_angle, &bal_ac, &unCh2In, PITCH_P_VAL, PITCH_I_VAL, PITCH_D_VAL, DIRECT);
-PID rollReg(&last_x_angle, &bal_bd, &unCh1In, ROLL_P_VAL, ROLL_I_VAL, ROLL_D_VAL, DIRECT);
+//PID yawReg(&ypr[0], &bal_axes, &unCh4In, YAW_P_VAL, YAW_I_VAL, YAW_D_VAL, DIRECT);
+PID pitchReg(&ypr[1], &bal_ac, &unCh2In, PITCH_P_VAL, PITCH_I_VAL, PITCH_D_VAL, DIRECT);
+PID rollReg(&ypr[2], &bal_bd, &unCh1In, ROLL_P_VAL, ROLL_I_VAL, ROLL_D_VAL, DIRECT);
 
 // DEBUG
 // #define DEBUG
 //#define OUTPUT_RECEIVER_VALUES
-//#define OUTPUT_READABLE_COMPLIMENTARY
-//#define OUTPUT_BAL_AC_BD
-//#define OUTPUT_MOTOR_VARIABLES
+// #define OUTPUT_BAL_AC_BD
+// #define OUTPUT_MOTOR_VARIABLES
 
 void setup()
 {
@@ -265,9 +172,6 @@ void setup()
   delay(5000);
 
   initMPU();
-  // get calibration values for sensors
-  calibrate_sensors();
-  set_last_read_angle_data(millis(), 0, 0, 0, 0, 0, 0);
   initRegulators();
 
   // using the MyPinChangeInt library, attach the interrupts
@@ -330,28 +234,6 @@ void initMPU() {
       Serial.println(F("DMP ready! Waiting for first interrupt..."));
     #endif
     dmpReady = true;
-
-    // Set the full scale range of the gyro
-    uint8_t FS_SEL = 0;
-    //mpu.setFullScaleGyroRange(FS_SEL);
-
-    // get default full scale value of gyro - may have changed from default
-    // function call returns values between 0 and 3
-    uint8_t READ_FS_SEL = mpu.getFullScaleGyroRange();
-    Serial.print("FS_SEL = ");
-    Serial.println(READ_FS_SEL);
-    GYRO_FACTOR = 131.0/(FS_SEL + 1);
-
-    // get default full scale value of accelerometer - may not be default value.
-    // Accelerometer scale factor doesn't reall matter as it divides out
-    uint8_t READ_AFS_SEL = mpu.getFullScaleAccelRange();
-    Serial.print("AFS_SEL = ");
-    Serial.println(READ_AFS_SEL);
-    //ACCEL_FACTOR = 16384.0/(AFS_SEL + 1);
-
-    // Set the full scale range of the accelerometer
-    //uint8_t AFS_SEL = 0;
-    //mpu.setFullScaleAccelRange(AFS_SEL);
 
     // get expected DMP packet size for later comparison
     packetSize = mpu.dmpGetFIFOPacketSize();
@@ -453,55 +335,6 @@ void loop()
     // Serial.println(unCh4In);
   #endif
 
-  // Keep calculating the values of the complementary filter angles for comparison with DMP here
-  // Read the raw accel/gyro values from the MPU-6050
-  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-
-  // Get time of last raw data read
-  t_now = millis();
-
-  // Remove offsets and scale gyro data
-  gyro_x = (gx - base_x_gyro)/GYRO_FACTOR;
-  gyro_y = (gy - base_y_gyro)/GYRO_FACTOR;
-  // gyro_z = (gz - base_z_gyro)/GYRO_FACTOR;
-  accel_x = ax; // - base_x_accel;
-  accel_y = ay; // - base_y_accel;
-  // accel_z = az; // - base_z_accel;
-
-  accel_angle_x = atan(-accel_y/sqrt(pow(accel_x,2) + pow(accel_z,2)))*RADIANS_TO_DEGREES;
-  accel_angle_y = atan(accel_x/sqrt(pow(accel_y,2) + pow(accel_z,2)))*RADIANS_TO_DEGREES;
-  // accel_angle_z = 0;
-
-  // Compute the (filtered) gyro angles
-  dt = (t_now - get_last_time())/1000.0;
-  gyro_angle_x = gyro_x*dt + get_last_x_angle();
-  gyro_angle_y = gyro_y*dt + get_last_y_angle();
-  // gyro_angle_z = gyro_z*dt + get_last_z_angle();
-
-  // Compute the drifting gyro angles
-  unfiltered_gyro_angle_x = gyro_x*dt + get_last_gyro_x_angle();
-  unfiltered_gyro_angle_y = gyro_y*dt + get_last_gyro_y_angle();
-  // unfiltered_gyro_angle_z = gyro_z*dt + get_last_gyro_z_angle();
-
-  // Apply the complementary filter to figure out the change in angle - choice of alpha is
-  // estimated now.  Alpha depends on the sampling rate...
-  // const float alpha = 0.96;
-  angle_x = alpha*gyro_angle_x + (1.0 - alpha)*accel_angle_x;
-  angle_y = alpha*gyro_angle_y + (1.0 - alpha)*accel_angle_y;
-  // angle_z = gyro_angle_z;  //Accelerometer doesn't give z-angle
-
-  // Update the saved data with the latest values
-  set_last_read_angle_data(t_now, angle_x, angle_y, angle_z, unfiltered_gyro_angle_x, unfiltered_gyro_angle_y, unfiltered_gyro_angle_z);
-
-  #ifdef OUTPUT_READABLE_COMPLIMENTARY
-    Serial.print("CMP:\t");
-    Serial.print(get_last_z_angle(), 2);
-    Serial.print("\t:\t");
-    Serial.print(get_last_y_angle(), 2);
-    Serial.print("\t:\t");
-    Serial.println(get_last_x_angle(), 2);
-  #endif
-
   // reset interrupt flag and get INT_STATUS byte
   mpuInterrupt = false;
   mpuIntStatus = mpu.getIntStatus();
@@ -547,10 +380,14 @@ void loop()
   vc = ((100+bal_ac)/100)*unCh3In;
   vd = ((100+bal_bd)/100)*unCh3In;
 
-  if((va < ESC_MIN) || (va > ESC_MAX)) va = ESC_ARM;
-  if((vb < ESC_MIN) || (vb > ESC_MAX)) vb = ESC_ARM;
-  if((vc < ESC_MIN) || (vc > ESC_MAX)) vc = ESC_ARM;
-  // if((vd < ESC_MIN) || (vd > ESC_MAX)) vd = ESC_ARM;
+  if(va < ESC_MIN) va = ESC_ARM;
+  if(va > ESC_MAX) va = ESC_MAX;
+  if(vb < ESC_MIN) vb = ESC_ARM;
+  if(vb > ESC_MAX) vb = ESC_MAX;
+  if(vc < ESC_MIN) vc = ESC_ARM;
+  if(vc > ESC_MAX) vc = ESC_MAX;
+  if(vd < ESC_MIN) vd = ESC_ARM;
+  if(vd > ESC_MAX) vd = ESC_MAX;
 
   servoMotorA.write(va);
   //servoMotorB.write(vb);

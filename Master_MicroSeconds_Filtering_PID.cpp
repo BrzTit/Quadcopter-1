@@ -188,7 +188,7 @@ float va, vb, vc, vd;                    //velocities
 // PID Algorithm
 #include <PID_v1.h>
 
-#define PITCH_P_VAL 0.2f
+#define PITCH_P_VAL 0.6f
 #define PITCH_I_VAL 0.0f
 #define PITCH_D_VAL 0.0f
 
@@ -200,28 +200,29 @@ float va, vb, vc, vd;                    //velocities
 #define YAW_I_VAL 0.0f
 #define YAW_D_VAL 0.0f
 
-#define PITCH_MIN -20
-#define PITCH_MAX 20
+#define PITCH_MIN -100
+#define PITCH_MAX 100
 #define ROLL_MIN -30
 #define ROLL_MAX 30
 #define YAW_MIN -180
 #define YAW_MAX 180
-#define PID_PITCH_INFLUENCE 20
-#define PID_ROLL_INFLUENCE 20
-#define PID_YAW_INFLUENCE 20
+
+#define PID_PITCH_INFLUENCE 100
+#define PID_ROLL_INFLUENCE 100
+#define PID_YAW_INFLUENCE 100
 
 float bal_ac = 0, bal_bd = 0, bal_axes = 0;
 
-//PID yawReg(&ypr[0], &bal_axes, &unCh4In, YAW_P_VAL, YAW_I_VAL, YAW_D_VAL, DIRECT);
+//PID yawReg(&last_z_angle, &bal_axes, &unCh4In, YAW_P_VAL, YAW_I_VAL, YAW_D_VAL, DIRECT);
 PID pitchReg(&last_y_angle, &bal_ac, &unCh2In, PITCH_P_VAL, PITCH_I_VAL, PITCH_D_VAL, DIRECT);
 PID rollReg(&last_x_angle, &bal_bd, &unCh1In, ROLL_P_VAL, ROLL_I_VAL, ROLL_D_VAL, DIRECT);
 
 // DEBUG
-#define DEBUG
+// #define DEBUG
 //#define OUTPUT_RECEIVER_VALUES
 //#define OUTPUT_READABLE_COMPLIMENTARY
 //#define OUTPUT_BAL_AC_BD
-#define OUTPUT_MOTOR_VARIABLES
+//#define OUTPUT_MOTOR_VARIABLES
 
 void setup()
 {
@@ -406,7 +407,8 @@ void loop()
     }
     if(bUpdateFlags & CH2_FLAG)
     {
-      unCh2In = unCh2InShared; // pitch
+      //unCh2In = unCh2InShared; // pitch
+      unCh2In = map(unCh2InShared, ESC_MIN, ESC_MAX, PITCH_MIN, PITCH_MAX);
     }
     if(bUpdateFlags & CH3_FLAG)
     {
@@ -463,32 +465,32 @@ void loop()
   // Remove offsets and scale gyro data
   gyro_x = (gx - base_x_gyro)/GYRO_FACTOR;
   gyro_y = (gy - base_y_gyro)/GYRO_FACTOR;
-  gyro_z = (gz - base_z_gyro)/GYRO_FACTOR;
+  // gyro_z = (gz - base_z_gyro)/GYRO_FACTOR;
   accel_x = ax; // - base_x_accel;
   accel_y = ay; // - base_y_accel;
-  accel_z = az; // - base_z_accel;
+  // accel_z = az; // - base_z_accel;
 
   accel_angle_x = atan(-accel_y/sqrt(pow(accel_x,2) + pow(accel_z,2)))*RADIANS_TO_DEGREES;
   accel_angle_y = atan(accel_x/sqrt(pow(accel_y,2) + pow(accel_z,2)))*RADIANS_TO_DEGREES;
-  accel_angle_z = 0;
+  // accel_angle_z = 0;
 
   // Compute the (filtered) gyro angles
   dt = (t_now - get_last_time())/1000.0;
   gyro_angle_x = gyro_x*dt + get_last_x_angle();
   gyro_angle_y = gyro_y*dt + get_last_y_angle();
-  gyro_angle_z = gyro_z*dt + get_last_z_angle();
+  // gyro_angle_z = gyro_z*dt + get_last_z_angle();
 
   // Compute the drifting gyro angles
   unfiltered_gyro_angle_x = gyro_x*dt + get_last_gyro_x_angle();
   unfiltered_gyro_angle_y = gyro_y*dt + get_last_gyro_y_angle();
-  unfiltered_gyro_angle_z = gyro_z*dt + get_last_gyro_z_angle();
+  // unfiltered_gyro_angle_z = gyro_z*dt + get_last_gyro_z_angle();
 
   // Apply the complementary filter to figure out the change in angle - choice of alpha is
   // estimated now.  Alpha depends on the sampling rate...
   // const float alpha = 0.96;
   angle_x = alpha*gyro_angle_x + (1.0 - alpha)*accel_angle_x;
   angle_y = alpha*gyro_angle_y + (1.0 - alpha)*accel_angle_y;
-  angle_z = gyro_angle_z;  //Accelerometer doesn't give z-angle
+  // angle_z = gyro_angle_z;  //Accelerometer doesn't give z-angle
 
   // Update the saved data with the latest values
   set_last_read_angle_data(t_now, angle_x, angle_y, angle_z, unfiltered_gyro_angle_x, unfiltered_gyro_angle_y, unfiltered_gyro_angle_z);
@@ -546,6 +548,11 @@ void loop()
   vb = abs(((-100+bal_bd)/100)*unCh3In);
   vc = ((100+bal_ac)/100)*unCh3In;
   vd = ((100+bal_bd)/100)*unCh3In;
+
+  if((va < ESC_MIN) || (va > ESC_MAX)) va = ESC_MIN;
+  if((vb < ESC_MIN) || (vb > ESC_MAX)) vb = ESC_MIN;
+  if((vc < ESC_MIN) || (vc > ESC_MAX)) vc = ESC_MIN;
+  // if((vd < ESC_MIN) || (vd > ESC_MAX)) vd = ESC_MIN;
 
   if(unCh3In < ESC_TAKEOFF_OFFSET){
     va = ESC_MIN;

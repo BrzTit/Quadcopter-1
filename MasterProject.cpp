@@ -31,6 +31,8 @@ volatile float unCh4InShared;
 float unCh1In, unCh2In, unCh3In, unCh4In;
 float unCh1InLast, unCh2InLast, unCh3InLast, unCh4InLast;
 
+float v_ac, v_bd; // velocity of axes
+
 // These are used to record the rising edge of a pulse in the calcInput functions
 // They do not need to be volatile as they are only used in the ISR. If we wanted
 // to refer to these in loop and the ISR then they would need to be declared volatile
@@ -186,124 +188,86 @@ float va, vb, vc, vd;                    //velocities
 // PID Algorithm
 #include <PID_v1.h>
 
-#define PITCH_P_VAL 4.1f
+// #define PITCH_P_VAL 4.1f
+#define PITCH_P_VAL 1.0f
 #define PITCH_I_VAL 0.0f
 #define PITCH_D_VAL 0.0f
 // #define PITCH_I_VAL 0.01f
 // #define PITCH_D_VAL 0.003f
 
-#define ROLL_P_VAL 0.0f
+#define ROLL_P_VAL 1.0f
 #define ROLL_I_VAL 0.0f
 #define ROLL_D_VAL 0.0f
 
-// #define YAW_P_VAL 0.0f
-// #define YAW_I_VAL 0.0f
-// #define YAW_D_VAL 0.0f
+#define YAW_P_VAL 0.0f
+#define YAW_I_VAL 0.0f
+#define YAW_D_VAL 0.0f
 
 #define PITCH_MIN -200
 #define PITCH_MAX 200
 #define ROLL_MIN -100
 #define ROLL_MAX 100
-// #define YAW_MIN -180
-// #define YAW_MAX 180
+#define YAW_MIN -180
+#define YAW_MAX 180
 
 #define PID_PITCH_INFLUENCE 100
 #define PID_ROLL_INFLUENCE 100
-// #define PID_YAW_INFLUENCE 100
+#define PID_YAW_INFLUENCE 100
 
 float bal_ac = 0, bal_bd = 0, bal_axes = 0;
 
-//PID yawReg(&last_z_angle, &bal_axes, &unCh4In, YAW_P_VAL, YAW_I_VAL, YAW_D_VAL, DIRECT);
+PID yawReg(&last_z_angle, &bal_axes, &unCh4In, YAW_P_VAL, YAW_I_VAL, YAW_D_VAL, DIRECT);
 PID pitchReg(&last_y_angle, &bal_ac, &unCh2In, PITCH_P_VAL, PITCH_I_VAL, PITCH_D_VAL, DIRECT);
 PID rollReg(&last_x_angle, &bal_bd, &unCh1In, ROLL_P_VAL, ROLL_I_VAL, ROLL_D_VAL, DIRECT);
 
 // Cam and SD
-#include <MySoftwareSerial.h>
+
+#include <TimedAction.h>
 #include <Adafruit_VC0706.h>
 #include <SPI.h>
 #include <SD.h>
+
+TimedAction timedAction = TimedAction(30000, takePicture);
 
 // SD card chip select line varies among boards/shields:
 // Arduino Mega w/hardware SPI: pin 53
 #define chipSelect 53
 
-// On Mega: camera TX connected to pin 69 (A15), camera RX to pin 3:
-MySoftwareSerial cameraconnection = MySoftwareSerial(69, 3);
-
-Adafruit_VC0706 cam = Adafruit_VC0706(&cameraconnection);
+// Using hardware serial on Mega: camera TX conn. to RX1,
+// camera RX to TX1, no SoftwareSerial object is required:
+Adafruit_VC0706 cam = Adafruit_VC0706(&Serial1);
 
 // DEBUG
-// #define DEBUG
+#define DEBUG
 // #define OUTPUT_RECEIVER_VALUES
 // #define OUTPUT_READABLE_COMPLIMENTARY
 // #define OUTPUT_BAL_AC_BD
-// #define OUTPUT_MOTOR_VARIABLES
+// #define OUTPUT_V_AC_BD
+#define OUTPUT_MOTOR_VARIABLES
 
 void setup()
 {
-  #ifdef DEBUG
-    Serial.begin(115200);
-  #endif
-
   // Pin configuration
-  pinMode(A0, OUTPUT);
-  pinMode(A1, OUTPUT);
   pinMode(A2, OUTPUT);
   pinMode(A3, OUTPUT);
   pinMode(A4, OUTPUT);
   pinMode(A5, OUTPUT);
   pinMode(A6, OUTPUT);
   pinMode(A7, OUTPUT);
-  digitalWrite(A0, HIGH);   // Cam PWR
-  digitalWrite(A1, HIGH);   // SD PWR
+  pinMode(A8, OUTPUT);
+
   digitalWrite(A2, HIGH);   // RC PWR
   digitalWrite(A3, HIGH);   // MPU PWR
   digitalWrite(A4, LOW);    // RC GND
   digitalWrite(A5, LOW);    // ESC GND
   digitalWrite(A6, LOW);    // ESC GND
   digitalWrite(A7, LOW);    // ESC GND
+  digitalWrite(A8, LOW);    // MPU GND
 
-  // attach servo objects, these will generate the correct
-  // pulses for driving Electronic speed controllers, servos or other devices
-  // designed to interface directly with RC Receivers
-  servoMotorA.attach(ESC1_OUT_PIN, ESC_MIN, ESC_MAX);
-  servoMotorB.attach(ESC2_OUT_PIN, ESC_MIN, ESC_MAX);
-  servoMotorC.attach(ESC3_OUT_PIN, ESC_MIN, ESC_MAX);
-  servoMotorD.attach(ESC4_OUT_PIN, ESC_MIN, ESC_MAX);
-
-  delay(100);
-
-  // arm ESCs
-  servoMotorA.write(ESC_ARM);
-  servoMotorB.write(ESC_ARM);
-  servoMotorC.write(ESC_ARM);
-  servoMotorD.write(ESC_ARM);
-
-  delay(5000);
-
-  initCamAndSD();
-  initMPU();
-  // get calibration values for sensors
-  calibrate_sensors();
-  set_last_read_angle_data(millis(), 0, 0, 0, 0, 0, 0);
-  initRegulators();
-
-  // using the MyPinChangeInt library, attach the interrupts
-  // used to read the channels
-  PCintPort::attachInterrupt(CH1_IN_PIN, calcCh1, CHANGE);
-  PCintPort::attachInterrupt(CH2_IN_PIN, calcCh2, CHANGE);
-  PCintPort::attachInterrupt(CH3_IN_PIN, calcCh3, CHANGE);
-  PCintPort::attachInterrupt(CH4_IN_PIN, calcCh4, CHANGE);
-}
-
-void initCamAndSD() {
-  // When using hardware SPI, the SS pin MUST be set to an
-  // output (even if not connected or used).  If left as a
-  // floating input w/SPI on, this can cause lockuppage.
   pinMode(53, OUTPUT); // SS on Mega
 
   #ifdef DEBUG
-    Serial.println("-----------------");
+    Serial.begin(115200);
     Serial.println("VC0706 Camera snapshot test");
   #endif
 
@@ -327,22 +291,26 @@ void initCamAndSD() {
     #endif
     return;
   }
-
-  #ifdef DEBUG
-    // Print out the camera version information (optional)
-    char *reply = cam.getVersion();
-    if (reply == 0) {
+  // Print out the camera version information (optional)
+  char *reply = cam.getVersion();
+  if (reply == 0) {
+    #ifdef DEBUG
       Serial.print("Failed to get version");
-    } else {
+    #endif
+  } else {
+    #ifdef DEBUG
+      Serial.println("-----------------");
       Serial.print(reply);
-    }
-  #endif
+      Serial.println("-----------------");
+    #endif
+  }
 
   // Set the picture size - you can choose one of 640x480, 320x240 or 160x120
   // Remember that bigger pictures take longer to transmit!
-  //cam.setImageSize(VC0706_640x480);   // biggest
-  cam.setImageSize(VC0706_320x240);     // medium
-  //cam.setImageSize(VC0706_160x120);   // small
+
+  //cam.setImageSize(VC0706_640x480);        // biggest
+  //cam.setImageSize(VC0706_320x240);        // medium
+  cam.setImageSize(VC0706_160x120);          // small
 
   #ifdef DEBUG
     // You can read the size back from the camera (optional, but maybe useful?)
@@ -353,78 +321,43 @@ void initCamAndSD() {
     if (imgsize == VC0706_160x120) Serial.println("160x120");
   #endif
 
-  #ifdef DEBUG
-    Serial.println("Snap in 3 secs...");
-  #endif
-  delay(5000);
+  // attach servo objects, these will generate the correct
+  // pulses for driving Electronic speed controllers, servos or other devices
+  // designed to interface directly with RC Receivers
+  servoMotorA.attach(ESC1_OUT_PIN, ESC_MIN, ESC_MAX);
+  servoMotorB.attach(ESC2_OUT_PIN, ESC_MIN, ESC_MAX);
+  servoMotorC.attach(ESC3_OUT_PIN, ESC_MIN, ESC_MAX);
+  servoMotorD.attach(ESC4_OUT_PIN, ESC_MIN, ESC_MAX);
 
-  if (! cam.takePicture()) {
-    #ifdef DEBUG
-      Serial.println("Failed to snap!");
-    #endif
-  } else {
-    #ifdef DEBUG
-      Serial.println("Picture taken!");
-    #endif
-  }
+  delay(100);
 
-  // Create an image with the name IMAGExx.JPG
-  char filename[13];
-  strcpy(filename, "IMAGE00.JPG");
-  for (int i = 0; i < 100; i++) {
-    filename[5] = '0' + i/10;
-    filename[6] = '0' + i%10;
-    // create if does not exist, do not open existing, write, sync after write
-    if (! SD.exists(filename)) {
-      break;
-    }
-  }
+  // arm ESCs
+  servoMotorA.write(ESC_ARM);
+  servoMotorB.write(ESC_ARM);
+  servoMotorC.write(ESC_ARM);
+  servoMotorD.write(ESC_ARM);
 
-  // Open the file for writing
-  File imgFile = SD.open(filename, FILE_WRITE);
+  delay(3000);
 
-  // Get the size of the image (frame) taken
-  uint16_t jpglen = cam.frameLength();
-  #ifdef DEBUG
-    Serial.print("Storing ");
-    Serial.print(jpglen, DEC);
-    Serial.print(" byte image.");
-  #endif
+  initMPU();
 
-  int32_t time = millis();
-  pinMode(8, OUTPUT);
+  // get calibration values for sensors
+  calibrate_sensors();
+  set_last_read_angle_data(millis(), 0, 0, 0, 0, 0, 0);
+  initRegulators();
 
-  // Read all the data up to # bytes!
-  while (jpglen > 0) {
-    // read 32 bytes at a time;
-    uint8_t *buffer;
-    uint8_t bytesToRead = min(32, jpglen); // change 32 to 64 for a speedup but may not work with all setups!
-    buffer = cam.readPicture(bytesToRead);
-    imgFile.write(buffer, bytesToRead);
-    #ifdef DEBUG
-      byte wCount = 0; // For counting # of writes
-      if(++wCount >= 64) { // Every 2K, give a little feedback so it doesn't appear locked up
-        Serial.print('.');
-        wCount = 0;
-      }
-      Serial.print("Read ");  Serial.print(bytesToRead, DEC); Serial.println(" bytes");
-    #endif
-    jpglen -= bytesToRead;
-  }
-  imgFile.close();
-
-  #ifdef DEBUG
-    time = millis() - time;
-    Serial.println("done!");
-    Serial.print(time); Serial.println(" ms elapsed");
-    Serial.println("-----------------");
-  #endif
+  // using the MyPinChangeInt library, attach the interrupts
+  // used to read the channels
+  PCintPort::attachInterrupt(CH1_IN_PIN, calcCh1, CHANGE);
+  PCintPort::attachInterrupt(CH2_IN_PIN, calcCh2, CHANGE);
+  PCintPort::attachInterrupt(CH3_IN_PIN, calcCh3, CHANGE);
+  PCintPort::attachInterrupt(CH4_IN_PIN, calcCh4, CHANGE);
 }
 
 void initMPU() {
 
   Wire.begin();
-  TWBR = 24; // set 400kHz mode @ 16MHz CPU or 200kHz mode @ 8MHz CPU
+  TWBR = 12; // set 400kHz mode @ 16MHz CPU or 200kHz mode @ 8MHz CPU
 
   // initialize device
   #ifdef DEBUG
@@ -520,8 +453,8 @@ void initRegulators(){
   pitchReg.SetOutputLimits(-PID_PITCH_INFLUENCE, PID_PITCH_INFLUENCE);
   rollReg.SetMode(AUTOMATIC);
   rollReg.SetOutputLimits(-PID_ROLL_INFLUENCE, PID_ROLL_INFLUENCE);
-  //yawReg.SetMode(AUTOMATIC);
-  //yawReg.SetOutputLimits(-PID_YAW_INFLUENCE, PID_YAW_INFLUENCE);
+  yawReg.SetMode(AUTOMATIC);
+  yawReg.SetOutputLimits(-PID_YAW_INFLUENCE, PID_YAW_INFLUENCE);
 }
 
 void loop()
@@ -544,11 +477,12 @@ void loop()
 
     if(bUpdateFlags & CH1_FLAG)
     {
-      unCh1In = unCh1InShared; // roll
+      // unCh1In = unCh1InShared; // roll
+      unCh1In = map(unCh1InShared, ESC_MIN, ESC_MAX, ROLL_MIN, ROLL_MAX);
     }
     if(bUpdateFlags & CH2_FLAG)
     {
-      //unCh2In = unCh2InShared; // pitch
+      // unCh2In = unCh2InShared; // pitch
       unCh2In = map(unCh2InShared, ESC_MIN, ESC_MAX, PITCH_MIN, PITCH_MAX);
     }
     if(bUpdateFlags & CH3_FLAG)
@@ -558,6 +492,7 @@ void loop()
     if(bUpdateFlags & CH4_FLAG)
     {
       unCh4In = unCh4InShared; // yaw
+      // unCh4In = map(unCh4InShared, ESC_MIN, ESC_MAX, YAW_MIN, YAW_MAX);
     }
 
     // clear shared copy of updated flags as we have already taken the updates
@@ -577,12 +512,12 @@ void loop()
   if((unCh1In < ESC_MIN) || (unCh1In > ESC_MAX)) unCh1In = unCh1InLast;
   if((unCh2In < ESC_MIN) || (unCh2In > ESC_MAX)) unCh2In = unCh2InLast;
   if((unCh3In < ESC_MIN) || (unCh3In > ESC_MAX)) unCh3In = unCh3InLast;
-  // if((unCh4In < ESC_MIN) || (unCh4In > ESC_MAX)) unCh4In = unCh4InLast;
+  if((unCh4In < ESC_MIN) || (unCh4In > ESC_MAX)) unCh4In = unCh4InLast;
 
   unCh1InLast = unCh1In;
   unCh2InLast = unCh2In;
   unCh3InLast = unCh3In;
-  // unCh4InLast = unCh4In;
+  unCh4InLast = unCh4In;
 
   #ifdef OUTPUT_RECEIVER_VALUES
     Serial.print("ch1, ch2, ch3, ch4");
@@ -591,9 +526,9 @@ void loop()
     Serial.print("\t\t");
     Serial.print(unCh2In);
     Serial.print("\t\t");
-    Serial.println(unCh3In);
-    // Serial.print("\t\t");
-    // Serial.println(unCh4In);
+    Serial.print(unCh3In);
+    Serial.print("\t\t");
+    Serial.println(unCh4In);
   #endif
 
   // Keep calculating the values of the complementary filter angles for comparison with DMP here
@@ -606,31 +541,30 @@ void loop()
   // Remove offsets and scale gyro data
   gyro_x = (gx - base_x_gyro)/GYRO_FACTOR;
   gyro_y = (gy - base_y_gyro)/GYRO_FACTOR;
-  // gyro_z = (gz - base_z_gyro)/GYRO_FACTOR;
+  gyro_z = (gz - base_z_gyro)/GYRO_FACTOR;
   accel_x = ax; // - base_x_accel;
   accel_y = ay; // - base_y_accel;
-  // accel_z = az; // - base_z_accel;
+  accel_z = az; // - base_z_accel;
 
   accel_angle_x = atan(-accel_y/sqrt(pow(accel_x,2) + pow(accel_z,2)))*RADIANS_TO_DEGREES;
   accel_angle_y = atan(accel_x/sqrt(pow(accel_y,2) + pow(accel_z,2)))*RADIANS_TO_DEGREES;
-  // accel_angle_z = 0;
+  accel_angle_z = 0;
 
   // Compute the (filtered) gyro angles
   dt = (t_now - get_last_time())/1000.0;
   gyro_angle_x = gyro_x*dt + get_last_x_angle();
   gyro_angle_y = gyro_y*dt + get_last_y_angle();
-  // gyro_angle_z = gyro_z*dt + get_last_z_angle();
+  gyro_angle_z = gyro_z*dt + get_last_z_angle();
 
   // Compute the drifting gyro angles
   unfiltered_gyro_angle_x = gyro_x*dt + get_last_gyro_x_angle();
   unfiltered_gyro_angle_y = gyro_y*dt + get_last_gyro_y_angle();
-  // unfiltered_gyro_angle_z = gyro_z*dt + get_last_gyro_z_angle();
+  unfiltered_gyro_angle_z = gyro_z*dt + get_last_gyro_z_angle();
 
-  // Apply the complementary filter to figure out the change in angle - choice of alpha is
-  // estimated now.  Alpha depends on the sampling rate...
-  // const float alpha = 0.96;
-  angle_x = alpha*gyro_angle_x + (1.0 - alpha)*accel_angle_x;
-  angle_y = alpha*gyro_angle_y + (1.0 - alpha)*accel_angle_y;
+  // Apply the complementary filter to figure out the change in angle
+  // const float alpha = 0.98;
+  angle_x = alpha*gyro_angle_x + (.02)*accel_angle_x;
+  angle_y = alpha*gyro_angle_y + (.02)*accel_angle_y; // .02 from (1.0 - alpha)
   // angle_z = gyro_angle_z;  //Accelerometer doesn't give z-angle
 
   // Update the saved data with the latest values
@@ -675,20 +609,31 @@ void loop()
 
   rollReg.Compute();
   pitchReg.Compute();
-  // yawReg.Compute();
+  yawReg.Compute();
 
   #ifdef OUTPUT_BAL_AC_BD
-    Serial.print("ac, bd");
+    Serial.print("bal_ac, bal_bd");
     Serial.print("\t\t");
     Serial.print(bal_ac);
     Serial.print("\t\t");
     Serial.println(bal_bd);
   #endif
 
+  v_ac = (abs(-100+bal_axes)/100)*unCh3In;
+  v_bd = ((100+bal_axes)/100)*unCh3In;
+
+  #ifdef OUTPUT_V_AC_BD
+    Serial.print("v_ac, v_bd");
+    Serial.print("\t\t");
+    Serial.print(v_ac);
+    Serial.print("\t\t");
+    Serial.println(v_bd);
+  #endif
+
   va = abs(((-100+bal_ac)/100)*unCh3In);
-  vb = abs(((-100+bal_bd)/100)*unCh3In);
+  vb = ((100+bal_bd)/100)*unCh3In;
   vc = ((100+bal_ac)/100)*unCh3In;
-  vd = ((100+bal_bd)/100)*unCh3In;
+  vd = abs(((-100+bal_bd)/100)*unCh3In);
 
   if(unCh3In < ESC_ARM){
     va = ESC_MIN;
@@ -707,9 +652,9 @@ void loop()
   if(vd > ESC_MAX) vd = ESC_MAX;
 
   servoMotorA.write(va);
-  // servoMotorB.write(vb);
+  servoMotorB.write(vb);
   servoMotorC.write(vc);
-  // servoMotorD.write(vd);
+  servoMotorD.write(vd);
 
   #ifdef OUTPUT_MOTOR_VARIABLES
     Serial.print("v, va, vb, vc, vd");
@@ -725,7 +670,66 @@ void loop()
     Serial.println(vd);
   #endif
 
+  timedAction.check();
+
   bUpdateFlags = 0;
+}
+
+void takePicture(){
+  #ifdef DEBUG
+    Serial.println("Snapping...");
+  #endif
+
+  if (!cam.takePicture()) {
+    #ifdef DEBUG
+      Serial.println("Failed to snap!");
+    #endif
+    return;
+  }
+
+  // Create an image with the name IMAGExx.JPG
+  char filename[13];
+  strcpy(filename, "IMAGE00.JPG");
+  for (int i = 0; i < 100; i++) {
+    filename[5] = '0' + i/10;
+    filename[6] = '0' + i%10;
+    // create if does not exist, do not open existing, write, sync after write
+    if (!SD.exists(filename)) {
+      break;
+    }
+  }
+
+  // Open the file for writing
+  File imgFile = SD.open(filename, FILE_WRITE);
+
+  // Get the size of the image (frame) taken
+  uint16_t jpglen = cam.frameLength();
+  #ifdef DEBUG
+    Serial.print("Storing ");
+    Serial.print(jpglen, DEC);
+    Serial.print(" byte image.");
+  #endif
+
+  int32_t time = millis();
+
+  // Read all the data up to # bytes!
+  while (jpglen > 0) {
+    // read 32 bytes at a time;
+    uint8_t *buffer;
+    uint8_t bytesToRead = min(64, jpglen); // change 32 to 64 for a speedup but may not work with all setups!
+    buffer = cam.readPicture(bytesToRead);
+    imgFile.write(buffer, bytesToRead);
+    jpglen -= bytesToRead;
+  }
+  imgFile.close();
+  cam.reset();
+
+  #ifdef DEBUG
+    time = millis() - time;
+    Serial.println("done!");
+    Serial.print(time); Serial.println(" ms elapsed");
+    Serial.println("-----------------");
+  #endif
 }
 
 // simple interrupt service routine
@@ -740,7 +744,7 @@ void calcCh1(){
     // else it must be a falling edge, so lets get the time and subtract the time of the rising edge
     // this gives use the time between the rising and falling edges i.e. the pulse duration.
     unCh1InShared = (uint16_t)(micros() - ulCh1Start);
-    // use set the throttle flag to indicate that a new throttle signal has been received
+    // use set flag to indicate that a new signal has been received
     bUpdateFlagsShared |= CH1_FLAG;
   }
 }

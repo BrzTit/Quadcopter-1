@@ -7,16 +7,6 @@
 #define CH3_IN_PIN 11
 #define CH4_IN_PIN 10
 
-// These bit flags are set in bUpdateFlagsShared to indicate which
-// channels have new signals
-#define CH1_FLAG 1
-#define CH2_FLAG 2
-#define CH3_FLAG 4
-#define CH4_FLAG 8
-
-// holds the update flags defined above
-volatile uint8_t bUpdateFlagsShared;
-
 // shared variables are updated by the ISR and read by loop.
 // In loop we immediatley take local copies so that the ISR can keep ownership of the
 // shared ones. To access these in loop
@@ -47,9 +37,9 @@ float ulCh4Start;
 #define ESC3_OUT_PIN 5
 #define ESC4_OUT_PIN 4
 
-#define ESC_MIN 1000
-#define ESC_MAX 1900
-#define ESC_ARM 1150
+#define ESC_MIN 1000.0
+#define ESC_MAX 1900.0
+#define ESC_ARM 1150.0
 
 // MPU
 #include "I2Cdev.h"
@@ -203,12 +193,12 @@ float va, vb, vc, vd;                    //velocities
 #define YAW_I_VAL 0.0f
 #define YAW_D_VAL 0.0f
 
-#define PITCH_MIN -200
-#define PITCH_MAX 200
-#define ROLL_MIN -100
-#define ROLL_MAX 100
-#define YAW_MIN -180
-#define YAW_MAX 180
+#define PITCH_MIN -100.0
+#define PITCH_MAX 100.0
+#define ROLL_MIN -100.0
+#define ROLL_MAX 100.0
+#define YAW_MIN -180.0
+#define YAW_MAX 180.0
 
 #define PID_PITCH_INFLUENCE 100
 #define PID_ROLL_INFLUENCE 100
@@ -238,12 +228,12 @@ TimedAction timedAction = TimedAction(30000, takePicture);
 Adafruit_VC0706 cam = Adafruit_VC0706(&Serial1);
 
 // DEBUG
-#define DEBUG
+// #define DEBUG
 // #define OUTPUT_RECEIVER_VALUES
 // #define OUTPUT_READABLE_COMPLIMENTARY
 // #define OUTPUT_BAL_AC_BD
 // #define OUTPUT_V_AC_BD
-#define OUTPUT_MOTOR_VARIABLES
+// #define OUTPUT_MOTOR_VARIABLES
 
 void setup()
 {
@@ -357,7 +347,7 @@ void setup()
 void initMPU() {
 
   Wire.begin();
-  TWBR = 12; // set 400kHz mode @ 16MHz CPU or 200kHz mode @ 8MHz CPU
+  TWBR = 24; // set 400kHz mode @ 16MHz CPU or 200kHz mode @ 8MHz CPU
 
   // initialize device
   #ifdef DEBUG
@@ -459,50 +449,26 @@ void initRegulators(){
 
 void loop()
 {
-  // local copy of variables on first function call to hold local copies
-  static uint8_t bUpdateFlags;
-
   // if programming failed, don't try to do anything
   if (!dmpReady) return;
 
   // wait for MPU interrupt or extra packet(s) available
   while (!mpuInterrupt && fifoCount < packetSize) {}
 
-  // check shared update flags to see if any channels have a new signal
-  if(bUpdateFlagsShared) {
-    noInterrupts(); // turn interrupts off quickly while we take local copies of the shared variables
+  noInterrupts(); // turn interrupts off quickly while we take local copies of the shared variables
 
-    // take a local copy of which channels were updated
-    bUpdateFlags = bUpdateFlagsShared;
+  // unCh1In = unCh1InShared; // roll
+  unCh1In = map(unCh1InShared, ESC_MIN, ESC_MAX, ROLL_MIN, ROLL_MAX);
+  // unCh2In = unCh2InShared; // pitch
+  unCh2In = map(unCh2InShared, ESC_MIN, ESC_MAX, PITCH_MIN, PITCH_MAX);
+  unCh3In = unCh3InShared; // velocity
+  // unCh4In = unCh4InShared; // yaw
+  unCh4In = map(unCh4InShared, ESC_MIN, ESC_MAX, YAW_MIN, YAW_MAX);
 
-    if(bUpdateFlags & CH1_FLAG)
-    {
-      // unCh1In = unCh1InShared; // roll
-      unCh1In = map(unCh1InShared, ESC_MIN, ESC_MAX, ROLL_MIN, ROLL_MAX);
-    }
-    if(bUpdateFlags & CH2_FLAG)
-    {
-      // unCh2In = unCh2InShared; // pitch
-      unCh2In = map(unCh2InShared, ESC_MIN, ESC_MAX, PITCH_MIN, PITCH_MAX);
-    }
-    if(bUpdateFlags & CH3_FLAG)
-    {
-      unCh3In = unCh3InShared; // velocity
-    }
-    if(bUpdateFlags & CH4_FLAG)
-    {
-      unCh4In = unCh4InShared; // yaw
-      // unCh4In = map(unCh4InShared, ESC_MIN, ESC_MAX, YAW_MIN, YAW_MAX);
-    }
-
-    // clear shared copy of updated flags as we have already taken the updates
-    bUpdateFlagsShared = 0;
-
-    interrupts(); // we have local copies of the inputs, so now we can turn interrupts back on
-    // as soon as interrupts are back on, we can no longer use the shared copies, the interrupt
-    // service routines own these and could update them at any time. During the update, the
-    // shared copies may contain junk. Luckily we have our local copies to work with
-  }
+  interrupts(); // we have local copies of the inputs, so now we can turn interrupts back on
+  // as soon as interrupts are back on, we can no longer use the shared copies, the interrupt
+  // service routines own these and could update them at any time. During the update, the
+  // shared copies may contain junk. Luckily we have our local copies to work with
 
   // do any processing from here onwards
   // only use the local values unCh1In, unCh2In, unCh3In, unCh4In
@@ -630,10 +596,15 @@ void loop()
     Serial.println(v_bd);
   #endif
 
-  va = abs(((-100+bal_ac)/100)*unCh3In);
-  vb = ((100+bal_bd)/100)*unCh3In;
-  vc = ((100+bal_ac)/100)*unCh3In;
-  vd = abs(((-100+bal_bd)/100)*unCh3In);
+  va = abs(((-100+bal_ac)/100)*v_ac);
+  vb = ((100+bal_bd)/100)*v_bd;
+  vc = ((100+bal_ac)/100)*v_ac;
+  vd = abs(((-100+bal_bd)/100)*v_bd);
+
+  // va = abs(((-100+bal_ac)/100)*unCh3In);
+  // vb = ((100+bal_bd)/100)*unCh3In;
+  // vc = ((100+bal_ac)/100)*unCh3In;
+  // vd = abs(((-100+bal_bd)/100)*unCh3In);
 
   if(unCh3In < ESC_ARM){
     va = ESC_MIN;
@@ -671,8 +642,6 @@ void loop()
   #endif
 
   timedAction.check();
-
-  bUpdateFlags = 0;
 }
 
 void takePicture(){
@@ -732,6 +701,80 @@ void takePicture(){
   #endif
 }
 
+float fscale( float originalMin, float originalMax, float newBegin, float
+newEnd, float inputValue, float curve){
+
+  float OriginalRange = 0;
+  float NewRange = 0;
+  float zeroRefCurVal = 0;
+  float normalizedCurVal = 0;
+  float rangedValue = 0;
+  boolean invFlag = 0;
+
+
+  // condition curve parameter
+  // limit range
+
+  if (curve > 10) curve = 10;
+  if (curve < -10) curve = -10;
+
+  curve = (curve * -.1) ; // - invert and scale - this seems more intuitive - postive numbers give more weight to high end on output
+  curve = pow(10, curve); // convert linear scale into lograthimic exponent for other pow function
+
+  /*
+   Serial.println(curve * 100, DEC);   // multply by 100 to preserve resolution
+   Serial.println();
+   */
+
+  // Check for out of range inputValues
+  if (inputValue < originalMin) {
+    inputValue = originalMin;
+  }
+  if (inputValue > originalMax) {
+    inputValue = originalMax;
+  }
+
+  // Zero Refference the values
+  OriginalRange = originalMax - originalMin;
+
+  if (newEnd > newBegin){
+    NewRange = newEnd - newBegin;
+  }
+  else
+  {
+    NewRange = newBegin - newEnd;
+    invFlag = 1;
+  }
+
+  zeroRefCurVal = inputValue - originalMin;
+  normalizedCurVal  =  zeroRefCurVal / OriginalRange;   // normalize to 0 - 1 float
+
+  /*
+  Serial.print(OriginalRange, DEC);
+   Serial.print("   ");
+   Serial.print(NewRange, DEC);
+   Serial.print("   ");
+   Serial.println(zeroRefCurVal, DEC);
+   Serial.println();
+   */
+
+  // Check for originalMin > originalMax  - the math for all other cases i.e. negative numbers seems to work out fine
+  if (originalMin > originalMax ) {
+    return 0;
+  }
+
+  if (invFlag == 0){
+    rangedValue =  (pow(normalizedCurVal, curve) * NewRange) + newBegin;
+
+  }
+  else     // invert the ranges
+  {
+    rangedValue =  newBegin - (pow(normalizedCurVal, curve) * NewRange);
+  }
+
+  return rangedValue;
+}
+
 // simple interrupt service routine
 void calcCh1(){
   // if the pin is high, its a rising edge of the signal pulse, so lets record its value
@@ -744,8 +787,6 @@ void calcCh1(){
     // else it must be a falling edge, so lets get the time and subtract the time of the rising edge
     // this gives use the time between the rising and falling edges i.e. the pulse duration.
     unCh1InShared = (uint16_t)(micros() - ulCh1Start);
-    // use set flag to indicate that a new signal has been received
-    bUpdateFlagsShared |= CH1_FLAG;
   }
 }
 void calcCh2(){
@@ -756,7 +797,6 @@ void calcCh2(){
   else
   {
     unCh2InShared = (uint16_t)(micros() - ulCh2Start);
-    bUpdateFlagsShared |= CH2_FLAG;
   }
 }
 void calcCh3(){
@@ -767,7 +807,6 @@ void calcCh3(){
   else
   {
     unCh3InShared = (uint16_t)(micros() - ulCh3Start);
-    bUpdateFlagsShared |= CH3_FLAG;
   }
 }
 void calcCh4(){
@@ -778,6 +817,5 @@ void calcCh4(){
   else
   {
     unCh4InShared = (uint16_t)(micros() - ulCh4Start);
-    bUpdateFlagsShared |= CH4_FLAG;
   }
 }
